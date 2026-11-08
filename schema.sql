@@ -1,0 +1,24 @@
+CREATE TABLE IF NOT EXISTS submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
+    category TEXT NOT NULL CHECK (category IN ('Electronics', 'Mechanical', 'Architecture')),
+    condition TEXT NOT NULL CHECK (condition IN ('Like new', 'Good', 'Fair', 'For parts')),
+    description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 2000),
+    contact_name TEXT NOT NULL CHECK (length(contact_name) BETWEEN 1 AND 100),
+    email TEXT NOT NULL CHECK (length(email) <= 254),
+    phone TEXT NOT NULL CHECK (length(phone) <= 40),
+    location TEXT NOT NULL CHECK (length(location) BETWEEN 1 AND 120),
+    photos TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'inspection', 'listed', 'closed')),
+    grade TEXT CHECK (grade IS NULL OR grade IN ('A', 'B', 'C', 'For parts')),
+    listing_type TEXT CHECK (listing_type IS NULL OR listing_type IN ('Sale', 'Rent')),
+    asking_price REAL CHECK (asking_price IS NULL OR asking_price > 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_submissions_status_created
+    ON submissions (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_submissions_category_type
+    ON submissions (category, listing_type);
