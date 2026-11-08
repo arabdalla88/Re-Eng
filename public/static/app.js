@@ -7,32 +7,63 @@ const STATUS_LABELS = {
 const STAGES = ["pending", "inspection", "listed", "closed"];
 const MAX_PHOTOS = 3;
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
-let db = null;
+const DB_NAME = "re-eng-local";
+const STORE_NAME = "submissions";
+let database;
 let listingTimer;
 let allListings = [];
 let allSubmissions = [];
+const photoUrls = new WeakMap();
 const byId = (id) => document.getElementById(id);
-const config = window.REENG_CONFIG || {};
-const configured =
-  config.supabaseUrl?.startsWith("https://")
-  && config.supabaseAnonKey
-  && config.supabaseAnonKey !== "YOUR_SUPABASE_ANON_KEY";
+const updates = "BroadcastChannel" in window ? new BroadcastChannel("re-eng-local") : null;
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const store = request.result.createObjectStore(STORE_NAME, { keyPath: "id" });
+      store.createIndex("status", "status");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open browser storage."));
+  });
+}
+
+function getAllSubmissions() {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readonly");
+    const request = transaction.objectStore(STORE_NAME).getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not read saved submissions."));
+    transaction.onabort = () => reject(transaction.error || new Error("Could not read saved submissions."));
+  });
+}
+
+function saveSubmission(submission) {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).put(submission);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Could not save submission."));
+    transaction.onabort = () => reject(transaction.error || new Error("Could not save submission."));
+  });
+}
 
 async function initialize() {
-  if (configured && window.supabase?.createClient) {
-    db = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
-  }
   bindNavigation();
   bindSubmissionForm();
   bindMarketplace();
   bindAdmin();
+  if (updates) updates.addEventListener("message", refreshFromOtherTab);
+  try {
+    database = await openDatabase();
+    await loadListings();
+  } catch (error) {
+    console.error("Could not initialize browser storage:", error);
+    showToast("This browser couldn't open local storage. Try another browser or free up storage.");
+  }
   const initialView = location.hash.slice(1);
   if (["marketplace", "submit", "admin"].includes(initialView)) showView(initialView);
-  if (db) {
-    await loadListings();
-  } else {
-    showConfigurationMessage();
-  }
   document.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
@@ -47,13 +78,9 @@ async function initialize() {
   });
 }
 
-function showConfigurationMessage() {
-  const message = "Finish the Supabase setup in the README to connect Re-Eng.";
-  byId("featured-listings").innerHTML = `<div class="loading-note">${message}</div>`;
-  byId("results-count").textContent = message;
-  byId("login-message").textContent = message;
-  byId("form-message").textContent = message;
-  byId("form-message").classList.add("error");
+async function refreshFromOtherTab() {
+  if (location.hash === "#admin") await loadAdmin();
+  await loadListings();
 }
 
 function bindNavigation() {
@@ -95,36 +122,35 @@ function showView(name, updateHistory = true) {
   if (name === "admin") loadAdmin();
 }
 
-function publicListing(row) {
+function listingFromSubmission(item) {
   return {
-    id: row.id,
-    name: row.name,
-    category: row.category,
-    condition: row.condition,
-    grade: row.grade,
-    description: row.description,
-    listingType: row.listing_type,
-    askingPrice: row.asking_price,
-    location: row.location,
-    photos: (row.photos || []).map((path) => photoUrl(path)),
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    condition: item.condition,
+    grade: item.grade,
+    description: item.description,
+    listingType: item.listingType,
+    askingPrice: item.askingPrice,
+    location: item.location,
+    photos: item.photos || [],
   };
 }
 
-function photoUrl(path) {
-  return db.storage.from(config.storageBucket || "reeng-images").getPublicUrl(path).data.publicUrl;
+function photoUrl(photo) {
+  if (!(photo instanceof Blob)) return "";
+  if (!photoUrls.has(photo)) photoUrls.set(photo, URL.createObjectURL(photo));
+  return photoUrls.get(photo);
 }
 
 async function loadListings() {
-  if (!db) return;
   const featured = byId("featured-listings");
   const results = byId("marketplace-listings");
   try {
-    const { data, error } = await db
-      .from("listings")
-      .select("id,name,category,condition,grade,description,listing_type,asking_price,location,photos,updated_at")
-      .order("updated_at", { ascending: false });
-    if (error) throw error;
-    allListings = data.map(publicListing);
+    allListings = (await getAllSubmissions())
+      .filter((item) => item.status === "listed" && item.grade && item.listingType && item.askingPrice)
+      .map(listingFromSubmission)
+      .sort((left, right) => right.id.localeCompare(left.id));
     renderFilteredListings();
     renderListings(featured, allListings.slice(0, 3));
     if (results) {
@@ -132,11 +158,11 @@ async function loadListings() {
       byId("marketplace-empty").hidden = allListings.length > 0;
     }
   } catch (error) {
-    console.error("Could not load Re-Eng listings:", error);
-    featured.innerHTML = '<div class="loading-note">The marketplace is taking a breather. Try refreshing in a moment.</div>';
+    console.error("Could not load local Re-Eng listings:", error);
+    featured.innerHTML = '<div class="loading-note">Could not read saved tools in this browser.</div>';
     if (results) {
       results.innerHTML = "";
-      byId("results-count").textContent = "Couldn't load the marketplace. Please try again.";
+      byId("results-count").textContent = "Could not read saved tools in this browser.";
     }
   }
 }
@@ -169,7 +195,7 @@ function renderListings(container, listings) {
   }
   container.innerHTML = listings.map((item, index) => {
     const image = item.photos?.length
-      ? `<img class="listing-photo" src="${escapeHtml(item.photos[0])}" alt="${escapeHtml(item.name)}">`
+      ? `<img class="listing-photo" src="${escapeHtml(photoUrl(item.photos[0]))}" alt="${escapeHtml(item.name)}">`
       : `<span class="product-mark ${categoryClass(item.category)}" aria-hidden="true">${categorySymbol(item.category)}</span>`;
     const price = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(item.askingPrice);
     return `<article class="listing-card">
@@ -239,10 +265,6 @@ function bindSubmissionForm() {
     event.preventDefault();
     const message = byId("form-message");
     const button = form.querySelector('button[type="submit"]');
-    if (!db) {
-      showMessage(message, "Finish the Supabase setup in the README before submitting.", true);
-      return;
-    }
     const photos = [...photoInput.files];
     if (
       photos.length > MAX_PHOTOS
@@ -265,49 +287,41 @@ function bindSubmissionForm() {
       return;
     }
     button.disabled = true;
-    button.textContent = "Sending for review…";
+    button.textContent = "Saving in this browser…";
     showMessage(message, "");
     try {
-      const uploadedPaths = [];
-      for (const file of photos) {
-        const extension = file.name.split(".").pop().toLowerCase();
-        const path = `${crypto.randomUUID()}.${extension}`;
-        const { error } = await db.storage.from(config.storageBucket || "reeng-images").upload(path, file, {
-          cacheControl: "3600",
-          contentType: file.type,
-          upsert: false,
-        });
-        if (error) throw error;
-        uploadedPaths.push(path);
-      }
-
-      const now = new Date().toISOString();
       const values = new FormData(form);
-      const { error } = await db.from("submissions").insert({
+      const item = {
+        id: `${Date.now()}-${crypto.randomUUID()}`,
         name: values.get("name").trim(),
         category: values.get("category"),
         condition: values.get("condition"),
         description: values.get("description").trim(),
-        contact_name: values.get("contact_name").trim(),
+        contactName: values.get("contact_name").trim(),
         email: values.get("email").trim(),
         phone: values.get("phone").trim(),
         location: values.get("location").trim(),
-        photos: uploadedPaths,
+        photos,
         status: "pending",
-        created_at: now,
-        updated_at: now,
-      });
-      if (error) throw error;
+        grade: null,
+        listingType: null,
+        askingPrice: null,
+        createdAt: new Date().toISOString(),
+      };
+      await saveSubmission(item);
+      updates?.postMessage("changed");
       form.reset();
       byId("file-list").textContent = "";
-      showMessage(message, "You're all set! Your tool is now Pending Inspection. Our team will be in touch.");
-      showToast("Submission received — thanks for giving good gear another life.");
+      showMessage(message, "Saved in this browser as Pending Inspection. This demo doesn't send your details to a team.");
+      showToast("Saved in this browser — thanks for giving good gear another life.");
+      await loadAdmin();
+      await loadListings();
     } catch (error) {
-      console.error("Could not submit tool:", error);
-      showMessage(message, "We couldn't send your submission. Please check your connection and try again.", true);
+      console.error("Could not save the local submission:", error);
+      showMessage(message, "Couldn't save this on your device. Check available browser storage and try again.", true);
     } finally {
       button.disabled = false;
-      button.innerHTML = 'Send for review <span>↗</span>';
+      button.innerHTML = 'Save in this browser <span>↗</span>';
     }
   });
 }
@@ -324,77 +338,45 @@ async function isSupportedImage(file) {
   if (!signature || file.type !== signature.type) return false;
   const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
   if (!signature.bytes.every((byte, index) => bytes[index] === byte)) return false;
-  return extension !== "webp"
-    || String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+  return extension !== "webp" || String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
 }
 
 function bindAdmin() {
-  byId("admin-login-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const message = byId("login-message");
-    showMessage(message, "");
-    if (!db) {
-      showMessage(message, "Finish the Supabase setup in the README before signing in.", true);
-      return;
-    }
-    try {
-      const { data, error } = await db.auth.signInWithPassword({
-        email: form.elements.email.value.trim(),
-        password: form.elements.password.value,
-      });
-      if (error) throw error;
-      const { data: membership, error: membershipError } = await db
-        .from("admin_users")
-        .select("user_id")
-        .eq("user_id", data.user.id)
-        .maybeSingle();
-      if (membershipError) throw membershipError;
-      if (!membership) {
-        await db.auth.signOut();
-        throw new Error("This account does not have Re-Eng admin access.");
-      }
-      form.reset();
-      setAdminState(true);
-      await loadAdmin();
-    } catch (error) {
-      showMessage(message, error.message || "Sign-in failed. Check your email and password.", true);
-    }
-  });
-  byId("admin-logout").addEventListener("click", async () => {
-    const { error } = await db.auth.signOut();
-    if (error) {
-      showToast(error.message);
-      return;
-    }
-    allSubmissions = [];
-    setAdminState(false);
-  });
   byId("admin-status-filter").addEventListener("change", renderAdminSubmissions);
   byId("admin-submissions").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-save-id]");
-    if (!button || !db) return;
+    if (!button) return;
     const card = button.closest(".submission-card");
-    const payload = {
-      status: card.querySelector("[name=status]").value,
-      updated_at: new Date().toISOString(),
+    const original = allSubmissions.find((item) => item.id === button.dataset.saveId);
+    if (!original) return;
+    const grade = card.querySelector("[name=grade]").value || null;
+    const listingType = card.querySelector("[name=listing_type]").value || null;
+    const rawPrice = card.querySelector("[name=asking_price]").value;
+    const askingPrice = rawPrice ? Number(rawPrice) : null;
+    const status = card.querySelector("[name=status]").value;
+    if (status === "listed" && (!grade || !listingType || !askingPrice || askingPrice <= 0)) {
+      showToast("Add an inspection grade, sale/rent type, and price before listing.");
+      return;
+    }
+    const updated = {
+      ...original,
+      status,
+      grade,
+      listingType,
+      askingPrice,
+      updatedAt: new Date().toISOString(),
     };
-    const grade = card.querySelector("[name=grade]").value;
-    const listingType = card.querySelector("[name=listing_type]").value;
-    const price = card.querySelector("[name=asking_price]").value;
-    if (grade) payload.grade = grade;
-    if (listingType) payload.listing_type = listingType;
-    if (price) payload.asking_price = Number(price);
     button.disabled = true;
     button.textContent = "Saving…";
     try {
-      const { error } = await db.from("submissions").update(payload).eq("id", button.dataset.saveId);
-      if (error) throw error;
-      showToast("Submission updated.");
+      await saveSubmission(updated);
+      updates?.postMessage("changed");
+      showToast("Submission updated in this browser.");
       await loadAdmin();
       await loadListings();
     } catch (error) {
-      showToast(error.message || "Couldn't update this submission.");
+      console.error("Could not update the local submission:", error);
+      showToast("Couldn't save changes on this device.");
       button.disabled = false;
       button.textContent = "Save changes";
     }
@@ -402,34 +384,9 @@ function bindAdmin() {
 }
 
 async function loadAdmin() {
-  if (!db) {
-    setAdminState(false);
-    return;
-  }
   try {
-    const { data: sessionData, error: sessionError } = await db.auth.getSession();
-    if (sessionError) throw sessionError;
-    const user = sessionData.session?.user;
-    if (!user) {
-      setAdminState(false);
-      return;
-    }
-    const { data: membership, error: membershipError } = await db
-      .from("admin_users")
-      .select("user_id")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (membershipError) throw membershipError;
-    if (!membership) {
-      await db.auth.signOut();
-      setAdminState(false);
-      showMessage(byId("login-message"), "This account does not have Re-Eng admin access.", true);
-      return;
-    }
-    setAdminState(true);
-    const { data, error } = await db.from("submissions").select("*").order("created_at", { ascending: false });
-    if (error) throw error;
-    allSubmissions = data.map(adminSubmission);
+    allSubmissions = (await getAllSubmissions())
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     const counts = Object.fromEntries(STAGES.map((status) => [
       status,
       allSubmissions.filter((submission) => submission.status === status).length,
@@ -438,26 +395,9 @@ async function loadAdmin() {
     renderAdminSubmissions();
     byId("admin-error").textContent = "";
   } catch (error) {
-    console.error("Could not load the Re-Eng operations dashboard:", error);
-    byId("admin-error").textContent = error.message || "Couldn't load submissions. Please try again.";
+    console.error("Could not load local admin submissions:", error);
+    byId("admin-error").textContent = "Could not read saved submissions in this browser.";
   }
-}
-
-function adminSubmission(row) {
-  return {
-    ...publicListing(row),
-    status: row.status,
-    contactName: row.contact_name,
-    email: row.email,
-    phone: row.phone,
-    createdAt: row.created_at,
-  };
-}
-
-function setAdminState(authenticated) {
-  byId("admin-login-card").hidden = authenticated;
-  byId("admin-dashboard").hidden = !authenticated;
-  byId("admin-logout").hidden = !authenticated;
 }
 
 function renderAdminStats(counts) {
@@ -473,11 +413,17 @@ function renderAdminSubmissions() {
   byId("admin-empty").hidden = submissions.length > 0;
   list.innerHTML = submissions.map((item) => {
     const thumbnail = item.photos?.length
-      ? `<img src="${escapeHtml(item.photos[0])}" alt="">`
+      ? `<img src="${escapeHtml(photoUrl(item.photos[0]))}" alt="">`
       : `<span>${categorySymbol(item.category)}</span>`;
-    const statusOptions = STAGES.map((status) => `<option value="${status}" ${status === item.status ? "selected" : ""}>${STATUS_LABELS[status]}</option>`).join("");
-    const gradeOptions = ["", "A", "B", "C", "For parts"].map((grade) => `<option value="${grade}" ${grade === (item.grade || "") ? "selected" : ""}>${grade || "Choose grade"}</option>`).join("");
-    const typeOptions = ["", "Sale", "Rent"].map((type) => `<option value="${type}" ${type === (item.listingType || "") ? "selected" : ""}>${type || "Choose type"}</option>`).join("");
+    const statusOptions = STAGES.map((status) =>
+      `<option value="${status}" ${status === item.status ? "selected" : ""}>${STATUS_LABELS[status]}</option>`
+    ).join("");
+    const gradeOptions = ["", "A", "B", "C", "For parts"].map((grade) =>
+      `<option value="${grade}" ${grade === (item.grade || "") ? "selected" : ""}>${grade || "Choose grade"}</option>`
+    ).join("");
+    const typeOptions = ["", "Sale", "Rent"].map((type) =>
+      `<option value="${type}" ${type === (item.listingType || "") ? "selected" : ""}>${type || "Choose type"}</option>`
+    ).join("");
     return `<article class="submission-card">
       <div class="submission-card-main">
         <div class="submission-thumb">${thumbnail}</div>
@@ -493,7 +439,7 @@ function renderAdminSubmissions() {
         <label class="admin-control"><span>Inspection grade</span><select name="grade">${gradeOptions}</select></label>
         <label class="admin-control"><span>Sale / rent</span><select name="listing_type">${typeOptions}</select></label>
         <label class="admin-control"><span>Price · USD</span><input name="asking_price" type="number" min="0.01" max="1000000" step="0.01" value="${item.askingPrice || ""}" placeholder="0.00"></label>
-        <button class="admin-save" data-save-id="${item.id}">Save changes</button>
+        <button class="admin-save" data-save-id="${escapeHtml(item.id)}">Save changes</button>
       </div>
     </article>`;
   }).join("");

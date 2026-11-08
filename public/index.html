@@ -10,8 +10,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="/static/config.js"></script>
     <script src="/static/app.js" defer></script>
   </head>
   <body>
@@ -31,6 +29,7 @@
         <button class="menu-toggle" aria-label="Open menu" aria-expanded="false"><span></span><span></span></button>
       </div>
     </header>
+    <div class="site-demo-note">Local preview — submissions and listings are saved only in this browser.</div>
 
     <main>
       <section class="view active" id="view-home" aria-labelledby="hero-title">
@@ -107,9 +106,9 @@
 
       <section class="view page-view" id="view-submit" aria-labelledby="submit-title" hidden>
         <div class="form-layout">
-          <div class="form-intro"><span class="eyebrow">Give good gear another go</span><h1 id="submit-title">A little info.<br><span class="serif-italic">A lot more making.</span></h1><p>Tell us about your tool and our team will take it from here. The form takes about 3 minutes.</p>
-            <div class="form-aside"><span class="aside-icon">✳</span><div><strong>What happens next?</strong><p>Our operations team will review your submission and get in touch about inspection, grading, and next steps.</p></div></div>
-            <div class="privacy-note"><span aria-hidden="true">◈</span> Your contact details are only shared with our operations team.</div>
+          <div class="form-intro"><span class="eyebrow">Give good gear another go</span><h1 id="submit-title">A little info.<br><span class="serif-italic">A lot more making.</span></h1><p>Try the owner intake in this browser and review your submission in the local operations dashboard.</p>
+            <div class="form-aside"><span class="aside-icon">✳</span><div><strong>What happens next?</strong><p>Your demo submission appears in the operations dashboard in this same browser. No one else can see it.</p></div></div>
+            <div class="privacy-note"><span aria-hidden="true">◈</span> Demo mode: contact details stay on this device.</div>
           </div>
           <form id="submission-form" class="submission-form">
             <div class="form-progress"><span>TOOL DETAILS</span><span>01 <i></i> 02</span></div>
@@ -117,10 +116,10 @@
               <label class="field"><span>Tool name <b>*</b></span><input name="name" required maxlength="120" placeholder="e.g. Digital multimeter" autocomplete="off"></label>
               <label class="field"><span>Category <b>*</b></span><select name="category" required><option value="" disabled selected>Choose one</option><option>Electronics</option><option>Mechanical</option><option>Architecture</option></select></label>
             </div>
-            <label class="field"><span>Condition <b>*</b></span><select name="condition" required><option value="" disabled selected>How would you describe it?</option><option>Like new</option><option>Good</option><option>Fair</option><option>For parts</option></select><small>Our team will confirm the final inspection grade.</small></label>
+            <label class="field"><span>Condition <b>*</b></span><select name="condition" required><option value="" disabled selected>How would you describe it?</option><option>Like new</option><option>Good</option><option>Fair</option><option>For parts</option></select><small>The local operations dashboard can record an inspection grade.</small></label>
             <label class="field"><span>Tell us a little more <b>*</b></span><textarea name="description" required maxlength="2000" rows="4" placeholder="Brand, model, how it's been used, anything we should know…"></textarea></label>
             <label class="field photo-field"><span>Photos <small>OPTIONAL · UP TO 3</small></span><input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple><span class="upload-hint">Drop a photo here, or <b>browse files</b><br><small>JPEG, PNG or WebP · 4 MB total</small></span><span class="file-list" id="file-list"></span></label>
-            <div class="form-divider"><span>AND HOW CAN WE REACH YOU?</span></div>
+            <div class="form-divider"><span>CONTACT DETAILS · SAVED LOCALLY ONLY</span></div>
             <div class="field-row">
               <label class="field"><span>Your name <b>*</b></span><input name="contact_name" required maxlength="100" placeholder="Full name" autocomplete="name"></label>
               <label class="field"><span>Email address <b>*</b></span><input name="email" type="email" required maxlength="254" placeholder="you@example.com" autocomplete="email"></label>
@@ -129,7 +128,7 @@
               <label class="field"><span>Phone number <small>OPTIONAL</small></span><input name="phone" type="tel" maxlength="40" placeholder="+1 (555) 000-0000" autocomplete="tel"></label>
               <label class="field"><span>City or area <b>*</b></span><input name="location" required maxlength="120" placeholder="e.g. Boston, MA" autocomplete="address-level2"></label>
             </div>
-            <div class="form-bottom"><span><b>*</b> Required fields</span><button class="button button-dark" type="submit">Send for review <span>↗</span></button></div>
+            <div class="form-bottom"><span><b>*</b> Required fields</span><button class="button button-dark" type="submit">Save in this browser <span>↗</span></button></div>
             <div class="form-message" id="form-message" role="status" aria-live="polite"></div>
           </form>
         </div>
@@ -137,12 +136,9 @@
 
       <section class="view page-view admin-view" id="view-admin" aria-labelledby="admin-title" hidden>
         <div class="admin-topline"><span class="eyebrow">Re-Eng operations</span><button class="text-link" data-view="home">← Back to site</button></div>
-        <div class="admin-header"><div><h1 id="admin-title">The good-work<br><span class="serif-italic">control room.</span></h1><p>Review incoming tools and move them toward their next home.</p></div><button class="button button-outline" id="admin-logout" hidden>Sign out <span>↗</span></button></div>
-        <div class="admin-login-card" id="admin-login-card">
-          <div class="login-icon">⌑</div><h2>For the people behind the tools.</h2><p>Sign in to manage submissions and inspections.</p>
-          <form id="admin-login-form"><label class="field"><span>Admin email</span><input name="email" type="email" required autocomplete="username" placeholder="admin@example.com"></label><label class="field"><span>Admin password</span><input name="password" type="password" required autocomplete="current-password"></label><button class="button button-dark" type="submit">Sign in <span>↗</span></button><div class="form-message" id="login-message" role="status" aria-live="polite"></div></form>
-        </div>
-        <div class="admin-dashboard" id="admin-dashboard" hidden>
+        <div class="admin-header"><div><h1 id="admin-title">The good-work<br><span class="serif-italic">control room.</span></h1><p>Review incoming tools and move them toward their next home.</p></div></div>
+        <div class="local-mode-banner"><strong>Local demo</strong> — submissions are saved only in this browser. Other visitors and devices cannot see them.</div>
+        <div class="admin-dashboard" id="admin-dashboard">
           <div class="dashboard-stats" id="dashboard-stats"></div>
           <div class="dashboard-toolbar"><div><span class="eyebrow">The workflow</span><h2>Tool submissions</h2></div><label class="select-box"><span class="sr-only">Filter by workflow stage</span><select id="admin-status-filter"><option value="">All stages</option><option value="pending">Pending Inspection</option><option value="inspection">Physical Inspection &amp; Grading</option><option value="listed">Listed for Sale/Rent</option><option value="closed">Sold / Rented Out</option></select></label></div>
           <div class="submission-list" id="admin-submissions"></div>

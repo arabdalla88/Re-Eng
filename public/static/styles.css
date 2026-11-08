@@ -50,6 +50,7 @@ a { color: inherit; text-decoration: none; }
 .button-outline { border: 1px solid #bdb8ac; color: var(--ink); background: transparent; }
 .button-outline:hover { background: #fffdf6; }
 .menu-toggle { display: none; }
+.site-demo-note { padding: 8px 15px; color: #716024; background: #fbf1ce; font-size: 10px; text-align: center; }
 
 .view { animation: reveal .32s ease both; }
 @keyframes reveal { from { opacity: .3; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
@@ -239,6 +240,8 @@ h1, h2, h3, p { margin-top: 0; }
 .toast.visible { opacity: 1; transform: translateY(0); }
 
 .admin-view { max-width: 1080px; }
+.local-mode-banner { margin: 0 0 24px; padding: 13px 15px; border: 1px solid #e6d69d; color: #716024; background: #fbf1ce; font-size: 11px; line-height: 1.6; }
+.local-mode-banner strong { margin-right: 5px; font-weight: 700; }
 .admin-topline { display: flex; align-items: center; justify-content: space-between; }
 .admin-header { display: flex; justify-content: space-between; align-items: end; margin: 22px 0 36px; }
 .admin-header h1 { margin-top: 0; font-size: 55px; }
