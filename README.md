@@ -76,4 +76,4 @@ python -m unittest discover -s tests -v
 | `PATCH` | `/api/admin/submissions/<id>` | Update status, inspection grade, listing type, and price |
 | `POST` | `/api/admin/logout` | End the admin session |
 
-Every mutating request requires the session's `X-CSRF-Token`. Photos are optional; up to three JPEG, PNG, or WebP images of 4 MB each are accepted.
+Every mutating request requires the session's `X-CSRF-Token`. Photos are optional; up to three JPEG, PNG, or WebP images are accepted, with a combined upload limit of 4 MB for serverless compatibility.

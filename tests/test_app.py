@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,8 +97,33 @@ class ReEngApiTests(unittest.TestCase):
         )
 
     def test_submission_requires_csrf_token(self):
-        response = self.client.post("/api/submissions", data={"name": "No token"})
+        response = self.client.post("/api/submissions", json={"name": "No token"})
         self.assertEqual(response.status_code, 403)
+        response.close()
+
+    def test_submission_rejects_photos_over_combined_upload_limit(self):
+        with patch("app.MAX_TOTAL_PHOTO_BYTES", 5):
+            response = self.client.post(
+                "/api/submissions",
+                headers=self.headers(),
+                data={
+                    "name": "Bench multimeter",
+                    "category": "Electronics",
+                    "condition": "Good",
+                    "description": "A reliable meter, tested recently.",
+                    "contact_name": "Sam Maker",
+                    "email": "sam@example.test",
+                    "phone": "+1 555 0100",
+                    "location": "Boston",
+                    "photos": [
+                        (io.BytesIO(b"\xff\xd8\xff" + b"a"), "one.jpg", "image/jpeg"),
+                        (io.BytesIO(b"\xff\xd8\xff" + b"b"), "two.jpg", "image/jpeg"),
+                    ],
+                },
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("together", response.json["error"])
+        response.close()
 
     def test_homepage_and_assets_are_served(self):
         homepage = self.client.get("/")

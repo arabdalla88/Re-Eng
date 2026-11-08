@@ -180,6 +180,12 @@ function bindSubmissionForm() {
       list.classList.add("error");
       return;
     }
+    if (files.reduce((total, file) => total + file.size, 0) > 4 * 1024 * 1024) {
+      photoInput.value = "";
+      list.textContent = "All photos together must total 4 MB or less.";
+      list.classList.add("error");
+      return;
+    }
     list.classList.remove("error");
     list.textContent = files.map((file) => file.name).join(" · ");
   });
@@ -188,8 +194,12 @@ function bindSubmissionForm() {
     const message = byId("form-message");
     const button = form.querySelector('button[type="submit"]');
     const photos = [...photoInput.files];
-    if (photos.length > 3 || photos.some((file) => file.size > 4 * 1024 * 1024)) {
-      message.textContent = "Please choose up to 3 photos, 4 MB or smaller each.";
+    if (
+      photos.length > 3
+      || photos.some((file) => file.size > 4 * 1024 * 1024)
+      || photos.reduce((total, file) => total + file.size, 0) > 4 * 1024 * 1024
+    ) {
+      message.textContent = "Please choose up to 3 photos, 4 MB total.";
       message.classList.add("error");
       return;
     }

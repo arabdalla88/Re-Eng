@@ -22,6 +22,7 @@ ALLOWED_STATUSES = {"pending", "inspection", "listed", "closed"}
 ALLOWED_LISTING_TYPES = {"Sale", "Rent"}
 MAX_PHOTOS = 3
 MAX_PHOTO_BYTES = 4 * 1024 * 1024
+MAX_TOTAL_PHOTO_BYTES = 4 * 1024 * 1024
 IMAGE_SIGNATURES = {
     ".jpg": (("image/jpeg",), (b"\xff\xd8\xff",)),
     ".jpeg": (("image/jpeg",), (b"\xff\xd8\xff",)),
@@ -41,10 +42,12 @@ def create_app(test_config=None):
         SUPABASE_STORAGE_BUCKET=os.environ.get("SUPABASE_STORAGE_BUCKET", "reeng-images"),
         DATABASE=os.environ.get("REENG_DATABASE", str(ROOT / "instance" / "reeng.sqlite3")),
         UPLOAD_FOLDER=os.environ.get("REENG_UPLOAD_FOLDER", str(ROOT / "instance" / "uploads")),
-        MAX_CONTENT_LENGTH=13 * 1024 * 1024,
+        MAX_CONTENT_LENGTH=4_500 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=os.environ.get("REENG_COOKIE_SECURE", "").lower() == "true",
+        SESSION_COOKIE_SECURE=os.environ.get(
+            "REENG_COOKIE_SECURE", "true" if os.environ.get("VERCEL") else "false"
+        ).lower() == "true",
     )
     if test_config:
         app.config.update(test_config)
@@ -157,6 +160,7 @@ def create_app(test_config=None):
             return jsonify({"error": f"Upload up to {MAX_PHOTOS} photos."}), 400
 
         photo_data = []
+        total_photo_bytes = 0
         try:
             for photo in photos:
                 if not photo or not photo.filename:
@@ -168,6 +172,9 @@ def create_app(test_config=None):
                 content = photo.stream.read(MAX_PHOTO_BYTES + 1)
                 if len(content) > MAX_PHOTO_BYTES:
                     return jsonify({"error": "Each photo must be 4 MB or smaller."}), 400
+                total_photo_bytes += len(content)
+                if total_photo_bytes > MAX_TOTAL_PHOTO_BYTES:
+                    return jsonify({"error": "All photos together must total 4 MB or less."}), 400
                 signature = signatures[1][0]
                 if not content.startswith(signature):
                     return jsonify({"error": "An uploaded photo is not a valid image file."}), 400
@@ -328,7 +335,7 @@ def create_app(test_config=None):
 
     @app.errorhandler(RequestEntityTooLarge)
     def request_too_large(_error):
-        return jsonify({"error": "Your upload is too large. Keep each photo under 4 MB and upload up to 3."}), 413
+        return jsonify({"error": "Your upload is too large. Keep all photos together under 4 MB."}), 413
 
     return app
 
