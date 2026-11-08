@@ -1,79 +1,36 @@
 # Re-Eng
 
-Re-Eng is an intake and operations MVP for giving pre-owned engineering tools a second life. Owners can submit tools for review, the operations team can inspect and publish them, and buyers can browse the live catalog.
+الموقع بقى JavaScript ثابت: Vercel بيعرض الموقع، وSupabase بيحفظ الطلبات والصور ويدير دخول الأدمن. مفيش Flask ولا سيرفر خاص محتاج تشغّله.
 
-## What is included
+## تشغيل الموقع أونلاين
 
-- Responsive landing page, tool intake form, search/filter catalog, and admin workflow dashboard.
-- Flask JSON API with SQLite for local development, PostgreSQL on Vercel, and private owner contact details.
-- Admin session authentication, CSRF protection, and validated image uploads.
-- Workflow stages: Pending Inspection → Physical Inspection & Grading → Listed for Sale/Rent → Sold / Rented Out.
+### ١. تجهيز Supabase مرة واحدة
 
-## Run locally
+1. افتح مشروعك في Supabase → **SQL Editor** → **New query**.
+2. انسخ محتوى `supabase_setup.sql` بالكامل من المستودع والصقه في الاستعلام، وبعدها اضغط **Run**.
+3. من **Authentication → Users**، أضف مستخدم الأدمن بالإيميل والباسورد اللي هتستخدمهم لدخول لوحة الأدمن.
+4. ارجع إلى **SQL Editor**، وغيّر `admin@example.com` في آخر استعلام في `supabase_setup.sql` لإيميل الأدمن. شيل `--` من أول الأسطر الثلاثة وشغّل الاستعلام.
+5. من **Project Settings → API**، انسخ **Project URL** و**anon / publishable key**. دول مفاتيح عامة مخصصة للموقع. **ما تستخدمش `service_role` key.**
 
-Requirements: Python 3.10+ and pip.
+### ٢. ربط الموقع بـSupabase
 
-```powershell
-cd D:\Re-Eng
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+افتح `public/static/config.js` واستبدل `YOUR_SUPABASE_PROJECT_URL` و`YOUR_SUPABASE_ANON_KEY` بالقيم اللي نسختها. ما تغيّرش `storageBucket`.
 
-$env:REENG_SECRET_KEY = python -c "import secrets; print(secrets.token_hex(32))"
-$env:REENG_ADMIN_PASSWORD = "choose-a-strong-password"
-python app.py
-```
+احفظ الملف وارفع التغيير إلى GitHub. لو مستودع GitHub مربوط بـVercel، هينشر الموقع تلقائيًا. لو مش مربوط: اعمل **Add New → Project** في Vercel واستورد `arabdalla88/Re-Eng`؛ إعدادات النشر موجودة في `vercel.json`.
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000). Select **Admin** and sign in with `REENG_ADMIN_PASSWORD`.
+بعد أول نشر، في Supabase افتح **Authentication → URL Configuration** وحط رابط موقع Vercel في **Site URL**.
 
-The database and uploaded images are created under `instance/`. To use different locations, set `REENG_DATABASE` and `REENG_UPLOAD_FOLDER`. Never use the example secrets in production.
+بعدها افتح الموقع: الزوار يقدروا يقدموا أدوات، والأدمن يدخل بإيميل وباسورد الخطوة ٣. بيانات الاتصال تظهر للأدمن فقط.
 
-## Deploy to Vercel
+> مفتاح `anon / publishable` ظاهر في كود المتصفح عمدًا؛ أمان البيانات معتمد على سياسات Supabase الموجودة في `supabase_setup.sql`. ما تحطش أبدًا مفتاح `service_role` في الموقع.
 
-Vercel's function filesystem is temporary, so production uses Supabase PostgreSQL for submissions and a Supabase Storage bucket for photos. Vercel detects the Flask application exported from `index.py`; assets in `public/` are served from Vercel's CDN. It is not safe to deploy with the local SQLite database.
+## معاينة محلية والاختبارات
 
-1. Create a Supabase project. In **SQL Editor**, run the contents of `schema_postgres.sql`.
-2. In **Storage**, create a public bucket named `reeng-images` (or choose another name and set `SUPABASE_STORAGE_BUCKET`).
-3. In the Supabase project settings, copy the PostgreSQL connection URI and project URL. Create a `service_role` secret key; never put it in frontend code or commit it.
-4. Push this project to a GitHub repository and import it in Vercel.
-5. In **Vercel → Project → Settings → Environment Variables**, set these for Production (and Preview if needed):
-
-   | Name | Value |
-   |---|---|
-   | `REENG_SECRET_KEY` | A new, long random secret |
-   | `REENG_ADMIN_PASSWORD` | A new, strong admin password |
-   | `DATABASE_URL` | Supabase PostgreSQL URI |
-   | `SUPABASE_URL` | Supabase project URL, e.g. `https://your-project.supabase.co` |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role secret |
-   | `SUPABASE_STORAGE_BUCKET` | `reeng-images` |
-
-6. Redeploy after setting the variables. Open the Vercel deployment URL and test an owner submission, admin sign-in, and image upload.
-
-Do not set `REENG_DATABASE` or `REENG_UPLOAD_FOLDER` on Vercel. The app deliberately refuses to start there without `DATABASE_URL`, so data is not silently written to temporary storage.
-
-Existing SQLite records and locally uploaded photos are not copied automatically to Supabase. Back them up and migrate them separately before switching production traffic if they need to be retained.
-
-### Deploy from the command line
-
-Alternatively, install the Vercel CLI and run `vercel` from the project directory. Add the same environment variables in the Vercel project settings before promoting a production deployment. Do not paste database credentials into source files or commit them.
-
-## Run tests
+افتح `public/index.html` باستخدام إضافة VS Code مثل Live Server، بعد إعداد `config.js`.
 
 ```powershell
-python -m unittest discover -s tests -v
+node --test tests\smoke.test.js
+node --check public\static\app.js
 ```
 
-## API overview
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` | `/api/csrf` | Start a session and issue a CSRF token |
-| `POST` | `/api/submissions` | Submit a tool (`multipart/form-data`) |
-| `GET` | `/api/listings` | Browse listed tools; optional `q`, `category`, and `type` filters |
-| `GET` | `/api/admin/session` | Check admin sign-in state |
-| `POST` | `/api/admin/login` | Sign in with the configured admin password |
-| `GET` | `/api/admin/submissions` | Review all submissions and workflow counts |
-| `PATCH` | `/api/admin/submissions/<id>` | Update status, inspection grade, listing type, and price |
-| `POST` | `/api/admin/logout` | End the admin session |
-
-Every mutating request requires the session's `X-CSRF-Token`. Photos are optional; up to three JPEG, PNG, or WebP images are accepted, with a combined upload limit of 4 MB for serverless compatibility.
+ملفات SQLite والصور المحلية القديمة لا تنتقل تلقائيًا إلى Supabase.

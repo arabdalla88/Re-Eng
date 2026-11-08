@@ -5,25 +5,22 @@ const STATUS_LABELS = {
   closed: "Sold / Rented Out",
 };
 const STAGES = ["pending", "inspection", "listed", "closed"];
-let csrfToken = "";
+const MAX_PHOTOS = 3;
+const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+let db = null;
 let listingTimer;
+let allListings = [];
 let allSubmissions = [];
 const byId = (id) => document.getElementById(id);
-
-async function api(url, options = {}) {
-  const headers = new Headers(options.headers || {});
-  if (csrfToken && options.method && options.method !== "GET") headers.set("X-CSRF-Token", csrfToken);
-  const response = await fetch(url, { ...options, headers });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Something went wrong. Please try again.");
-  return payload;
-}
+const config = window.REENG_CONFIG || {};
+const configured =
+  config.supabaseUrl?.startsWith("https://")
+  && config.supabaseAnonKey
+  && config.supabaseAnonKey !== "YOUR_SUPABASE_ANON_KEY";
 
 async function initialize() {
-  try {
-    csrfToken = (await api("/api/csrf")).csrfToken;
-  } catch {
-    showToast("Couldn't connect to Re-Eng. Please refresh the page.");
+  if (configured && window.supabase?.createClient) {
+    db = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
   }
   bindNavigation();
   bindSubmissionForm();
@@ -31,7 +28,11 @@ async function initialize() {
   bindAdmin();
   const initialView = location.hash.slice(1);
   if (["marketplace", "submit", "admin"].includes(initialView)) showView(initialView);
-  loadListings();
+  if (db) {
+    await loadListings();
+  } else {
+    showConfigurationMessage();
+  }
   document.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
@@ -44,6 +45,15 @@ async function initialize() {
     const requestedView = location.hash.slice(1);
     showView(["marketplace", "submit", "admin"].includes(requestedView) ? requestedView : "home", false);
   });
+}
+
+function showConfigurationMessage() {
+  const message = "Finish the Supabase setup in the README to connect Re-Eng.";
+  byId("featured-listings").innerHTML = `<div class="loading-note">${message}</div>`;
+  byId("results-count").textContent = message;
+  byId("login-message").textContent = message;
+  byId("form-message").textContent = message;
+  byId("form-message").classList.add("error");
 }
 
 function bindNavigation() {
@@ -85,32 +95,68 @@ function showView(name, updateHistory = true) {
   if (name === "admin") loadAdmin();
 }
 
+function publicListing(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    condition: row.condition,
+    grade: row.grade,
+    description: row.description,
+    listingType: row.listing_type,
+    askingPrice: row.asking_price,
+    location: row.location,
+    photos: (row.photos || []).map((path) => photoUrl(path)),
+  };
+}
+
+function photoUrl(path) {
+  return db.storage.from(config.storageBucket || "reeng-images").getPublicUrl(path).data.publicUrl;
+}
+
 async function loadListings() {
-  const query = new URLSearchParams();
-  const category = byId("category-filter")?.value;
-  const listingType = byId("type-filter")?.value;
-  const search = byId("search-input")?.value.trim();
-  if (category) query.set("category", category);
-  if (listingType) query.set("type", listingType);
-  if (search) query.set("q", search);
-  const suffix = query.size ? `?${query}` : "";
+  if (!db) return;
   const featured = byId("featured-listings");
   const results = byId("marketplace-listings");
   try {
-    const { listings } = await api(`/api/listings${suffix}`);
-    renderListings(featured, listings.slice(0, 3));
+    const { data, error } = await db
+      .from("listings")
+      .select("id,name,category,condition,grade,description,listing_type,asking_price,location,photos,updated_at")
+      .order("updated_at", { ascending: false });
+    if (error) throw error;
+    allListings = data.map(publicListing);
+    renderFilteredListings();
+    renderListings(featured, allListings.slice(0, 3));
     if (results) {
-      renderListings(results, listings);
-      byId("results-count").textContent = `${listings.length} ${listings.length === 1 ? "tool" : "tools"} ready for another round`;
-      byId("marketplace-empty").hidden = listings.length > 0;
+      byId("results-count").textContent = `${allListings.length} ${allListings.length === 1 ? "tool" : "tools"} ready for another round`;
+      byId("marketplace-empty").hidden = allListings.length > 0;
     }
-  } catch {
+  } catch (error) {
+    console.error("Could not load Re-Eng listings:", error);
     featured.innerHTML = '<div class="loading-note">The marketplace is taking a breather. Try refreshing in a moment.</div>';
     if (results) {
       results.innerHTML = "";
-      byId("results-count").textContent = "Couldn't load the marketplace.";
+      byId("results-count").textContent = "Couldn't load the marketplace. Please try again.";
     }
   }
+}
+
+function renderFilteredListings() {
+  const results = byId("marketplace-listings");
+  if (!results) return;
+  const category = byId("category-filter").value;
+  const listingType = byId("type-filter").value;
+  const search = byId("search-input").value.trim().toLocaleLowerCase();
+  const filtered = allListings.filter((item) => {
+    const matchesCategory = !category || item.category === category;
+    const matchesType = !listingType || item.listingType === listingType;
+    const matchesSearch = !search
+      || `${item.name} ${item.description} ${item.location}`.toLocaleLowerCase().includes(search);
+    return matchesCategory && matchesType && matchesSearch;
+  });
+  renderListings(results, filtered);
+  byId("results-count").textContent = `${filtered.length} ${filtered.length === 1 ? "tool" : "tools"} ready for another round`;
+  byId("marketplace-empty").hidden = filtered.length > 0;
 }
 
 function renderListings(container, listings) {
@@ -150,14 +196,14 @@ function bindMarketplace() {
   ["search-input", "category-filter", "type-filter"].forEach((id) => {
     byId(id).addEventListener(id === "search-input" ? "input" : "change", () => {
       clearTimeout(listingTimer);
-      listingTimer = setTimeout(loadListings, id === "search-input" ? 220 : 0);
+      listingTimer = setTimeout(renderFilteredListings, id === "search-input" ? 220 : 0);
     });
   });
   byId("clear-filters").addEventListener("click", () => {
     byId("search-input").value = "";
     byId("category-filter").value = "";
     byId("type-filter").value = "";
-    loadListings();
+    renderFilteredListings();
   });
   document.querySelector(".search-box kbd").textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K";
 }
@@ -168,19 +214,19 @@ function bindSubmissionForm() {
   photoInput.addEventListener("change", () => {
     const files = [...photoInput.files];
     const list = byId("file-list");
-    if (files.length > 3) {
+    if (files.length > MAX_PHOTOS) {
       photoInput.value = "";
-      list.textContent = "Choose up to 3 photos.";
+      list.textContent = `Choose up to ${MAX_PHOTOS} photos.`;
       list.classList.add("error");
       return;
     }
-    if (files.some((file) => file.size > 4 * 1024 * 1024)) {
+    if (files.some((file) => file.size > MAX_PHOTO_BYTES)) {
       photoInput.value = "";
       list.textContent = "Each photo must be 4 MB or smaller.";
       list.classList.add("error");
       return;
     }
-    if (files.reduce((total, file) => total + file.size, 0) > 4 * 1024 * 1024) {
+    if (files.reduce((total, file) => total + file.size, 0) > MAX_PHOTO_BYTES) {
       photoInput.value = "";
       list.textContent = "All photos together must total 4 MB or less.";
       list.classList.add("error");
@@ -193,29 +239,72 @@ function bindSubmissionForm() {
     event.preventDefault();
     const message = byId("form-message");
     const button = form.querySelector('button[type="submit"]');
+    if (!db) {
+      showMessage(message, "Finish the Supabase setup in the README before submitting.", true);
+      return;
+    }
     const photos = [...photoInput.files];
     if (
-      photos.length > 3
-      || photos.some((file) => file.size > 4 * 1024 * 1024)
-      || photos.reduce((total, file) => total + file.size, 0) > 4 * 1024 * 1024
+      photos.length > MAX_PHOTOS
+      || photos.some((file) => file.size > MAX_PHOTO_BYTES)
+      || photos.reduce((total, file) => total + file.size, 0) > MAX_PHOTO_BYTES
     ) {
-      message.textContent = "Please choose up to 3 photos, 4 MB total.";
-      message.classList.add("error");
+      showMessage(message, "Please choose up to 3 photos, 4 MB total.", true);
+      return;
+    }
+    let validImages;
+    try {
+      validImages = (await Promise.all(photos.map(isSupportedImage))).every(Boolean);
+    } catch (error) {
+      console.error("Could not read the selected photos:", error);
+      showMessage(message, "We couldn't read one of the selected photos. Please choose it again.", true);
+      return;
+    }
+    if (!validImages) {
+      showMessage(message, "Photos must be valid JPEG, PNG, or WebP images.", true);
       return;
     }
     button.disabled = true;
     button.textContent = "Sending for review…";
-    message.textContent = "";
-    message.classList.remove("error");
+    showMessage(message, "");
     try {
-      const result = await api("/api/submissions", { method: "POST", body: new FormData(form) });
+      const uploadedPaths = [];
+      for (const file of photos) {
+        const extension = file.name.split(".").pop().toLowerCase();
+        const path = `${crypto.randomUUID()}.${extension}`;
+        const { error } = await db.storage.from(config.storageBucket || "reeng-images").upload(path, file, {
+          cacheControl: "3600",
+          contentType: file.type,
+          upsert: false,
+        });
+        if (error) throw error;
+        uploadedPaths.push(path);
+      }
+
+      const now = new Date().toISOString();
+      const values = new FormData(form);
+      const { error } = await db.from("submissions").insert({
+        name: values.get("name").trim(),
+        category: values.get("category"),
+        condition: values.get("condition"),
+        description: values.get("description").trim(),
+        contact_name: values.get("contact_name").trim(),
+        email: values.get("email").trim(),
+        phone: values.get("phone").trim(),
+        location: values.get("location").trim(),
+        photos: uploadedPaths,
+        status: "pending",
+        created_at: now,
+        updated_at: now,
+      });
+      if (error) throw error;
       form.reset();
       byId("file-list").textContent = "";
-      message.textContent = `You're all set! Your tool is now Pending Inspection. Our team will be in touch. Reference #${result.id}.`;
+      showMessage(message, "You're all set! Your tool is now Pending Inspection. Our team will be in touch.");
       showToast("Submission received — thanks for giving good gear another life.");
     } catch (error) {
-      message.textContent = error.message;
-      message.classList.add("error");
+      console.error("Could not submit tool:", error);
+      showMessage(message, "We couldn't send your submission. Please check your connection and try again.", true);
     } finally {
       button.disabled = false;
       button.innerHTML = 'Send for review <span>↗</span>';
@@ -223,43 +312,73 @@ function bindSubmissionForm() {
   });
 }
 
+async function isSupportedImage(file) {
+  const extension = file.name.split(".").pop().toLowerCase();
+  const signatures = {
+    jpg: { type: "image/jpeg", bytes: [0xff, 0xd8, 0xff] },
+    jpeg: { type: "image/jpeg", bytes: [0xff, 0xd8, 0xff] },
+    png: { type: "image/png", bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+    webp: { type: "image/webp", bytes: [0x52, 0x49, 0x46, 0x46] },
+  };
+  const signature = signatures[extension];
+  if (!signature || file.type !== signature.type) return false;
+  const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  if (!signature.bytes.every((byte, index) => bytes[index] === byte)) return false;
+  return extension !== "webp"
+    || String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+}
+
 function bindAdmin() {
   byId("admin-login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const message = byId("login-message");
-    message.classList.remove("error");
-    message.textContent = "";
+    showMessage(message, "");
+    if (!db) {
+      showMessage(message, "Finish the Supabase setup in the README before signing in.", true);
+      return;
+    }
     try {
-      const result = await api("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: form.elements.password.value }),
+      const { data, error } = await db.auth.signInWithPassword({
+        email: form.elements.email.value.trim(),
+        password: form.elements.password.value,
       });
-      csrfToken = result.csrfToken;
+      if (error) throw error;
+      const { data: membership, error: membershipError } = await db
+        .from("admin_users")
+        .select("user_id")
+        .eq("user_id", data.user.id)
+        .maybeSingle();
+      if (membershipError) throw membershipError;
+      if (!membership) {
+        await db.auth.signOut();
+        throw new Error("This account does not have Re-Eng admin access.");
+      }
       form.reset();
       setAdminState(true);
       await loadAdmin();
     } catch (error) {
-      message.textContent = error.message;
-      message.classList.add("error");
+      showMessage(message, error.message || "Sign-in failed. Check your email and password.", true);
     }
   });
   byId("admin-logout").addEventListener("click", async () => {
-    try {
-      await api("/api/admin/logout", { method: "POST" });
-      setAdminState(false);
-    } catch (error) {
+    const { error } = await db.auth.signOut();
+    if (error) {
       showToast(error.message);
+      return;
     }
+    allSubmissions = [];
+    setAdminState(false);
   });
   byId("admin-status-filter").addEventListener("change", renderAdminSubmissions);
   byId("admin-submissions").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-save-id]");
-    if (!button) return;
-    const id = button.dataset.saveId;
+    if (!button || !db) return;
     const card = button.closest(".submission-card");
-    const payload = { status: card.querySelector("[name=status]").value };
+    const payload = {
+      status: card.querySelector("[name=status]").value,
+      updated_at: new Date().toISOString(),
+    };
     const grade = card.querySelector("[name=grade]").value;
     const listingType = card.querySelector("[name=listing_type]").value;
     const price = card.querySelector("[name=asking_price]").value;
@@ -269,15 +388,13 @@ function bindAdmin() {
     button.disabled = true;
     button.textContent = "Saving…";
     try {
-      await api(`/api/admin/submissions/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const { error } = await db.from("submissions").update(payload).eq("id", button.dataset.saveId);
+      if (error) throw error;
       showToast("Submission updated.");
       await loadAdmin();
+      await loadListings();
     } catch (error) {
-      showToast(error.message);
+      showToast(error.message || "Couldn't update this submission.");
       button.disabled = false;
       button.textContent = "Save changes";
     }
@@ -285,18 +402,56 @@ function bindAdmin() {
 }
 
 async function loadAdmin() {
+  if (!db) {
+    setAdminState(false);
+    return;
+  }
   try {
-    const sessionState = await api("/api/admin/session");
-    setAdminState(sessionState.authenticated);
-    if (!sessionState.authenticated) return;
-    const data = await api("/api/admin/submissions");
-    allSubmissions = data.submissions;
-    renderAdminStats(data.counts);
+    const { data: sessionData, error: sessionError } = await db.auth.getSession();
+    if (sessionError) throw sessionError;
+    const user = sessionData.session?.user;
+    if (!user) {
+      setAdminState(false);
+      return;
+    }
+    const { data: membership, error: membershipError } = await db
+      .from("admin_users")
+      .select("user_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (membershipError) throw membershipError;
+    if (!membership) {
+      await db.auth.signOut();
+      setAdminState(false);
+      showMessage(byId("login-message"), "This account does not have Re-Eng admin access.", true);
+      return;
+    }
+    setAdminState(true);
+    const { data, error } = await db.from("submissions").select("*").order("created_at", { ascending: false });
+    if (error) throw error;
+    allSubmissions = data.map(adminSubmission);
+    const counts = Object.fromEntries(STAGES.map((status) => [
+      status,
+      allSubmissions.filter((submission) => submission.status === status).length,
+    ]));
+    renderAdminStats(counts);
     renderAdminSubmissions();
     byId("admin-error").textContent = "";
   } catch (error) {
-    byId("admin-error").textContent = error.message;
+    console.error("Could not load the Re-Eng operations dashboard:", error);
+    byId("admin-error").textContent = error.message || "Couldn't load submissions. Please try again.";
   }
+}
+
+function adminSubmission(row) {
+  return {
+    ...publicListing(row),
+    status: row.status,
+    contactName: row.contact_name,
+    email: row.email,
+    phone: row.phone,
+    createdAt: row.created_at,
+  };
 }
 
 function setAdminState(authenticated) {
@@ -352,6 +507,11 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[char]);
+}
+
+function showMessage(element, message, isError = false) {
+  element.textContent = message;
+  element.classList.toggle("error", isError);
 }
 
 let toastTimer;

@@ -10,6 +10,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/static/config.js"></script>
     <script src="/static/app.js" defer></script>
   </head>
   <body>
@@ -138,7 +140,7 @@
         <div class="admin-header"><div><h1 id="admin-title">The good-work<br><span class="serif-italic">control room.</span></h1><p>Review incoming tools and move them toward their next home.</p></div><button class="button button-outline" id="admin-logout" hidden>Sign out <span>↗</span></button></div>
         <div class="admin-login-card" id="admin-login-card">
           <div class="login-icon">⌑</div><h2>For the people behind the tools.</h2><p>Sign in to manage submissions and inspections.</p>
-          <form id="admin-login-form"><label class="field"><span>Admin password</span><input name="password" type="password" required autocomplete="current-password"></label><button class="button button-dark" type="submit">Sign in <span>↗</span></button><div class="form-message" id="login-message" role="status" aria-live="polite"></div></form>
+          <form id="admin-login-form"><label class="field"><span>Admin email</span><input name="email" type="email" required autocomplete="username" placeholder="admin@example.com"></label><label class="field"><span>Admin password</span><input name="password" type="password" required autocomplete="current-password"></label><button class="button button-dark" type="submit">Sign in <span>↗</span></button><div class="form-message" id="login-message" role="status" aria-live="polite"></div></form>
         </div>
         <div class="admin-dashboard" id="admin-dashboard" hidden>
           <div class="dashboard-stats" id="dashboard-stats"></div>

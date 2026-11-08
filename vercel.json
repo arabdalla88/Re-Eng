@@ -1,9 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "index.py": {
-      "includeFiles": "{schema_postgres.sql,public/index.html}",
-      "maxDuration": 30
-    }
-  }
+  "framework": null,
+  "buildCommand": null,
+  "outputDirectory": "public"
 }
